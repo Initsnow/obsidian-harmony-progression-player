@@ -1,0 +1,19 @@
+.harmony-progression-player-token {
+  border-bottom: 1px dotted var(--text-accent);
+  color: var(--text-accent);
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.harmony-progression-player-token:hover,
+.harmony-progression-player-token:focus {
+  background-color: var(--background-modifier-hover);
+  border-radius: 4px;
+  outline: none;
+}
+
+.harmony-progression-player-token.is-playing {
+  background-color: var(--text-accent);
+  border-radius: 4px;
+  color: var(--text-on-accent);
+}

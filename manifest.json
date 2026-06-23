@@ -1,0 +1,9 @@
+{
+  "id": "harmony-progression-player",
+  "name": "Harmony Progression Player",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Detect and play harmonic progressions in configured folders.",
+  "author": "Initsnow",
+  "isDesktopOnly": false
+}

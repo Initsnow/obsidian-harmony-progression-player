@@ -1,0 +1,32 @@
+{
+  "name": "obsidian-harmony-progression-player",
+  "version": "0.1.0",
+  "description": "Detect and play chord progressions in selected Obsidian folders.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "test": "vitest run",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+  },
+  "keywords": [
+    "obsidian",
+    "plugin",
+    "harmony",
+    "music"
+  ],
+  "author": "Initsnow",
+  "license": "GPL-3.0-only",
+  "dependencies": {
+    "tonal": "^6.4.3",
+    "tone": "^15.1.22"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.23.1",
+    "obsidian": "^1.5.12",
+    "tslib": "^2.6.2",
+    "typescript": "^5.4.5",
+    "vitest": "^4.1.9"
+  }
+}

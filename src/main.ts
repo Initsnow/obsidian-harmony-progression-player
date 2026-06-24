@@ -1,4 +1,3 @@
-import * as Tone from "tone";
 import pianoA0 from "./piano-samples/A0.mp3";
 import pianoA1 from "./piano-samples/A1.mp3";
 import pianoA2 from "./piano-samples/A2.mp3";
@@ -37,6 +36,7 @@ import {
   Plugin,
   PluginSettingTab,
   Setting,
+  TAbstractFile,
   TFile,
   TFolder,
   TextComponent
@@ -59,13 +59,6 @@ interface HarmonyProgressionPlayerSettings {
 }
 
 type InstrumentName = "sampledPiano" | "softSynth" | "brightSynth";
-
-type PlaybackInstrument = {
-  triggerAttackRelease(notes: string[] | string, duration: Tone.Unit.Time, time?: Tone.Unit.Time, velocity?: number): PlaybackInstrument;
-  releaseAll(time?: Tone.Unit.Time): PlaybackInstrument;
-  dispose(): PlaybackInstrument;
-  toDestination(): PlaybackInstrument;
-};
 
 const DEFAULT_SETTINGS: HarmonyProgressionPlayerSettings = {
   enabledFolders: "",
@@ -109,6 +102,26 @@ const PIANO_SAMPLE_URLS = {
   C8: pianoC8
 };
 
+const NOTE_OFFSETS: Record<string, number> = {
+  C: 0,
+  "C#": 1,
+  Db: 1,
+  D: 2,
+  "D#": 3,
+  Eb: 3,
+  E: 4,
+  F: 5,
+  "F#": 6,
+  Gb: 6,
+  G: 7,
+  "G#": 8,
+  Ab: 8,
+  A: 9,
+  "A#": 10,
+  Bb: 10,
+  B: 11
+};
+
 export default class HarmonyProgressionPlayerPlugin extends Plugin {
   settings: HarmonyProgressionPlayerSettings;
   private player = new ProgressionPlayer();
@@ -133,7 +146,8 @@ export default class HarmonyProgressionPlayerPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const loadedSettings: unknown = await this.loadData();
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, isSettingsData(loadedSettings) ? loadedSettings : {});
     if ((this.settings.instrument as string) === "piano") {
       this.settings.instrument = "sampledPiano";
     }
@@ -149,7 +163,8 @@ export default class HarmonyProgressionPlayerPlugin extends Plugin {
       return;
     }
 
-    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
+    const ownerDocument = element.ownerDocument;
+    const walker = ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) => {
         if (!node.nodeValue || !node.nodeValue.trim()) {
           return NodeFilter.FILTER_REJECT;
@@ -194,7 +209,8 @@ export default class HarmonyProgressionPlayerPlugin extends Plugin {
       return;
     }
 
-    const fragment = document.createDocumentFragment();
+    const ownerDocument = textNode.ownerDocument;
+    const fragment = ownerDocument.createDocumentFragment();
     let cursor = 0;
 
     for (const match of matches) {
@@ -202,7 +218,7 @@ export default class HarmonyProgressionPlayerPlugin extends Plugin {
         fragment.appendText(original.slice(cursor, match.from));
       }
 
-      const button = document.createElement("span");
+      const button = ownerDocument.createElement("span");
       button.addClass("harmony-progression-player-token");
       button.setAttr("role", "button");
       button.setAttr("tabindex", "0");
@@ -222,7 +238,7 @@ export default class HarmonyProgressionPlayerPlugin extends Plugin {
       button.addEventListener("click", () => {
         void play();
       });
-      button.addEventListener("keydown", (event) => {
+      button.addEventListener("keydown", (event: KeyboardEvent) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           void play();
@@ -242,24 +258,42 @@ export default class HarmonyProgressionPlayerPlugin extends Plugin {
 }
 
 class ProgressionPlayer {
-  private instrument: PlaybackInstrument | null = null;
-  private instrumentName: InstrumentName | null = null;
+  private audioContext: AudioContext | null = null;
+  private masterGain: GainNode | null = null;
+  private sampleBuffers = new Map<keyof typeof PIANO_SAMPLE_URLS, AudioBuffer>();
   private activeElement: HTMLElement | null = null;
   private timeoutIds: number[] = [];
+  private activeNodes: AudioScheduledSourceNode[] = [];
+  private playbackId = 0;
 
   async play(progression: PlayableChord[], settings: HarmonyProgressionPlayerSettings, element: HTMLElement) {
     this.stop();
+    const playbackId = this.playbackId + 1;
+    this.playbackId = playbackId;
 
-    await Tone.start();
-    Tone.getDestination().volume.value = Tone.gainToDb(settings.volume);
+    const audioContext = this.getAudioContext();
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+    if (playbackId !== this.playbackId) {
+      return;
+    }
 
-    this.instrument = await this.getInstrument(settings.instrument);
+    if (settings.instrument === "sampledPiano") {
+      await this.preloadSamples(audioContext, progression);
+      if (playbackId !== this.playbackId) {
+        return;
+      }
+    }
+
+    const masterGain = this.getMasterGain();
+    masterGain.gain.setTargetAtTime(clamp(settings.volume, 0.05, 1), audioContext.currentTime, 0.01);
     this.activeElement = element;
     element.addClass("is-playing");
 
-    const now = Tone.now() + 0.03;
+    const now = audioContext.currentTime + 0.03;
     progression.forEach((chord, index) => {
-      this.instrument?.triggerAttackRelease(chord.notes, settings.chordSeconds * 0.88, now + index * settings.chordSeconds, 0.86);
+      this.playChord(audioContext, chord.notes, settings, now + index * settings.chordSeconds, playbackId);
     });
 
     const endMs = Math.ceil(progression.length * settings.chordSeconds * 1000 + 160);
@@ -267,12 +301,21 @@ class ProgressionPlayer {
   }
 
   stop() {
+    this.playbackId += 1;
+
     for (const timeoutId of this.timeoutIds) {
       window.clearTimeout(timeoutId);
     }
     this.timeoutIds = [];
 
-    this.instrument?.releaseAll();
+    for (const node of this.activeNodes) {
+      try {
+        node.stop();
+      } catch {
+        // Already stopped.
+      }
+    }
+    this.activeNodes = [];
 
     this.activeElement?.removeClass("is-playing");
     this.activeElement = null;
@@ -280,40 +323,147 @@ class ProgressionPlayer {
 
   dispose() {
     this.stop();
-    this.instrument?.dispose();
-    this.instrument = null;
-    this.instrumentName = null;
+    this.audioContext?.close();
+    this.audioContext = null;
+    this.masterGain = null;
+    this.sampleBuffers.clear();
   }
 
-  private async getInstrument(instrumentName: InstrumentName): Promise<PlaybackInstrument> {
-    if (this.instrument && this.instrumentName === instrumentName) {
-      return this.instrument;
+  private getAudioContext(): AudioContext {
+    if (this.audioContext) {
+      return this.audioContext;
     }
 
-    this.instrument?.dispose();
-    this.instrument = null;
-    this.instrumentName = null;
+    const audioContext = new AudioContext();
+    this.audioContext = audioContext;
+    return audioContext;
+  }
 
-    if (instrumentName === "sampledPiano") {
-      try {
-        const sampler = new Tone.Sampler({
-          urls: PIANO_SAMPLE_URLS,
-          release: 1.1
-        }).toDestination() as PlaybackInstrument;
-        await Tone.loaded();
-        this.instrument = sampler;
-        this.instrumentName = instrumentName;
-        return sampler;
-      } catch (error) {
-        console.error("Failed to decode bundled piano samples. Falling back to soft synth.", error);
-        new Notice("Could not load bundled piano samples. Falling back to soft synth.");
+  private getMasterGain(): GainNode {
+    if (this.masterGain) {
+      return this.masterGain;
+    }
+
+    const audioContext = this.getAudioContext();
+    this.masterGain = audioContext.createGain();
+    this.masterGain.connect(audioContext.destination);
+    return this.masterGain;
+  }
+
+  private async preloadSamples(audioContext: AudioContext, progression: PlayableChord[]) {
+    const sampleNotes = new Set<keyof typeof PIANO_SAMPLE_URLS>();
+    for (const chord of progression) {
+      for (const note of chord.notes) {
+        const sample = nearestSample(note);
+        if (sample) {
+          sampleNotes.add(sample.note);
+        }
       }
     }
 
-    const synth = createSynth(instrumentName === "sampledPiano" ? "softSynth" : instrumentName).toDestination() as PlaybackInstrument;
-    this.instrument = synth;
-    this.instrumentName = instrumentName;
-    return synth;
+    await Promise.all(
+      Array.from(sampleNotes).map(async (sampleNote) => {
+        try {
+          await this.getSampleBuffer(audioContext, sampleNote);
+        } catch (error) {
+          console.error("Failed to decode bundled piano sample. Falling back to soft synth.", error);
+        }
+      })
+    );
+  }
+
+  private playChord(audioContext: AudioContext, notes: string[], settings: HarmonyProgressionPlayerSettings, startTime: number, playbackId: number) {
+    if (playbackId !== this.playbackId) {
+      return;
+    }
+
+    for (const note of notes) {
+      if (settings.instrument === "sampledPiano") {
+        void this.playSample(audioContext, note, settings.chordSeconds, startTime, playbackId);
+      } else {
+        this.playSynth(audioContext, note, settings.instrument, settings.chordSeconds, startTime);
+      }
+    }
+  }
+
+  private async playSample(audioContext: AudioContext, note: string, durationSeconds: number, startTime: number, playbackId: number) {
+    const sample = nearestSample(note);
+    if (!sample) {
+      this.playSynth(audioContext, note, "softSynth", durationSeconds, startTime);
+      return;
+    }
+
+    try {
+      const buffer = await this.getSampleBuffer(audioContext, sample.note);
+      if (playbackId !== this.playbackId) {
+        return;
+      }
+
+      const source = audioContext.createBufferSource();
+      const gain = audioContext.createGain();
+      source.buffer = buffer;
+      source.playbackRate.value = 2 ** ((midiForNote(note) - midiForNote(sample.note)) / 12);
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.9, startTime + 0.012);
+      gain.gain.setValueAtTime(0.9, startTime + Math.max(0.012, durationSeconds * 0.78));
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + durationSeconds + 0.22);
+      source.connect(gain);
+      gain.connect(this.getMasterGain());
+      source.start(startTime);
+      source.stop(startTime + durationSeconds + 0.3);
+      this.trackSource(source);
+    } catch (error) {
+      console.error("Failed to decode bundled piano sample. Falling back to soft synth.", error);
+      new Notice("Could not load bundled piano sample. Falling back to soft synth.");
+      this.playSynth(audioContext, note, "softSynth", durationSeconds, startTime);
+    }
+  }
+
+  private async getSampleBuffer(audioContext: AudioContext, sampleNote: keyof typeof PIANO_SAMPLE_URLS): Promise<AudioBuffer> {
+    const cachedBuffer = this.sampleBuffers.get(sampleNote);
+    if (cachedBuffer) {
+      return cachedBuffer;
+    }
+
+    const response = await fetch(PIANO_SAMPLE_URLS[sampleNote]);
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = await audioContext.decodeAudioData(arrayBuffer);
+    this.sampleBuffers.set(sampleNote, buffer);
+    return buffer;
+  }
+
+  private playSynth(audioContext: AudioContext, note: string, instrument: Exclude<InstrumentName, "sampledPiano">, durationSeconds: number, startTime: number) {
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    const filter = audioContext.createBiquadFilter();
+    const frequency = frequencyForNote(note);
+    const config = synthConfig(instrument);
+
+    oscillator.type = config.type;
+    oscillator.frequency.setValueAtTime(frequency, startTime);
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(config.filterFrequency, startTime);
+    filter.Q.setValueAtTime(config.filterQ, startTime);
+
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.exponentialRampToValueAtTime(config.peakGain, startTime + config.attack);
+    gain.gain.exponentialRampToValueAtTime(config.sustainGain, startTime + config.attack + config.decay);
+    gain.gain.setValueAtTime(config.sustainGain, startTime + Math.max(config.attack + config.decay, durationSeconds * 0.76));
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + durationSeconds + config.release);
+
+    oscillator.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.getMasterGain());
+    oscillator.start(startTime);
+    oscillator.stop(startTime + durationSeconds + config.release + 0.05);
+    this.trackSource(oscillator);
+  }
+
+  private trackSource(source: AudioScheduledSourceNode) {
+    this.activeNodes.push(source);
+    source.addEventListener("ended", () => {
+      this.activeNodes = this.activeNodes.filter((node) => node !== source);
+    });
   }
 }
 
@@ -327,9 +477,15 @@ class HarmonyProgressionPlayerSettingTab extends PluginSettingTab {
   }
 
   display() {
+    this.renderSettings();
+  }
+
+  private renderSettings() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Harmony Progression Player" });
+    new Setting(containerEl)
+      .setName("Harmony Progression Player")
+      .setHeading();
 
     new Setting(containerEl)
       .setName("Enabled folders")
@@ -372,7 +528,6 @@ class HarmonyProgressionPlayerSettingTab extends PluginSettingTab {
       .addSlider((slider) =>
         slider
           .setLimits(2, 6, 1)
-          .setDynamicTooltip()
           .setValue(this.plugin.settings.octave)
           .onChange(async (value) => {
             this.plugin.settings.octave = value;
@@ -386,7 +541,6 @@ class HarmonyProgressionPlayerSettingTab extends PluginSettingTab {
       .addSlider((slider) =>
         slider
           .setLimits(0.25, 2, 0.05)
-          .setDynamicTooltip()
           .setValue(this.plugin.settings.chordSeconds)
           .onChange(async (value) => {
             this.plugin.settings.chordSeconds = value;
@@ -415,7 +569,6 @@ class HarmonyProgressionPlayerSettingTab extends PluginSettingTab {
       .addSlider((slider) =>
         slider
           .setLimits(0.05, 1, 0.01)
-          .setDynamicTooltip()
           .setValue(this.plugin.settings.volume)
           .onChange(async (value) => {
             this.plugin.settings.volume = value;
@@ -437,7 +590,7 @@ class HarmonyProgressionPlayerSettingTab extends PluginSettingTab {
     for (const folder of folders) {
       new Setting(containerEl)
         .setName(folder)
-        .setDesc(this.app.vault.getFolderByPath(folder) ? "Enabled" : "Folder not found")
+        .setDesc(this.getFolderByPath(folder) ? "Enabled" : "Folder not found")
         .addButton((button) =>
           button
             .setIcon("trash")
@@ -455,7 +608,7 @@ class HarmonyProgressionPlayerSettingTab extends PluginSettingTab {
       return;
     }
 
-    const folder = this.app.vault.getFolderByPath(normalized);
+    const folder = this.getFolderByPath(normalized);
     if (!folder) {
       new Notice(`Folder not found: ${normalized}`);
       return;
@@ -469,7 +622,7 @@ class HarmonyProgressionPlayerSettingTab extends PluginSettingTab {
     }
 
     this.folderInput?.setValue("");
-    this.display();
+    this.renderSettings();
   }
 
   private async removeEnabledFolder(folderPath: string) {
@@ -477,7 +630,12 @@ class HarmonyProgressionPlayerSettingTab extends PluginSettingTab {
       .filter((folder) => folder !== folderPath);
     this.plugin.settings.enabledFolders = serializeEnabledFolders(folders);
     await this.plugin.saveSettings();
-    this.display();
+    this.renderSettings();
+  }
+
+  private getFolderByPath(path: string): TFolder | null {
+    const abstractFile = this.app.vault.getAbstractFileByPath(path);
+    return abstractFile instanceof TFolder ? abstractFile : null;
   }
 }
 
@@ -491,8 +649,7 @@ class FolderSuggest extends AbstractInputSuggest<TFolder> {
 
   protected getSuggestions(query: string): TFolder[] {
     const normalizedQuery = normalizeFolder(query).toLowerCase();
-    return this.app.vault
-      .getAllFolders(false)
+    return getAllFolders(this.app.vault.getRoot())
       .filter((folder) => folder.path && folder.path.toLowerCase().includes(normalizedQuery))
       .slice(0, 50);
   }
@@ -508,46 +665,93 @@ class FolderSuggest extends AbstractInputSuggest<TFolder> {
   }
 }
 
-function createSynth(instrument: Exclude<InstrumentName, "sampledPiano">): Tone.PolySynth {
-  if (instrument === "brightSynth") {
-    return new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: "triangle" },
-      envelope: {
-        attack: 0.01,
-        decay: 0.15,
-        sustain: 0.45,
-        release: 0.5
-      }
-    });
-  }
+function isSettingsData(value: unknown): value is Partial<HarmonyProgressionPlayerSettings> {
+  return typeof value === "object" && value !== null;
+}
 
-  if (instrument === "softSynth") {
-    return new Tone.PolySynth(Tone.Synth, {
-      oscillator: { type: "sine" },
-      envelope: {
-        attack: 0.04,
-        decay: 0.2,
-        sustain: 0.35,
-        release: 0.8
-      }
-    });
-  }
-
-  return new Tone.PolySynth(Tone.AMSynth, {
-    harmonicity: 1.4,
-    envelope: {
-      attack: 0.015,
-      decay: 0.25,
-      sustain: 0.18,
-      release: 0.65
-    },
-    modulationEnvelope: {
-      attack: 0.02,
-      decay: 0.18,
-      sustain: 0.12,
-      release: 0.4
+function getAllFolders(root: TFolder): TFolder[] {
+  const folders: TFolder[] = [];
+  const visit = (file: TAbstractFile) => {
+    if (!(file instanceof TFolder)) {
+      return;
     }
-  });
+
+    if (file.path) {
+      folders.push(file);
+    }
+
+    for (const child of file.children) {
+      visit(child);
+    }
+  };
+
+  visit(root);
+  return folders;
+}
+
+function nearestSample(note: string): { note: keyof typeof PIANO_SAMPLE_URLS } | null {
+  const midi = midiForNote(note);
+  if (!Number.isFinite(midi)) {
+    return null;
+  }
+
+  return (Object.keys(PIANO_SAMPLE_URLS) as Array<keyof typeof PIANO_SAMPLE_URLS>)
+    .map((sampleNote) => ({ note: sampleNote, distance: Math.abs(midiForNote(sampleNote) - midi) }))
+    .sort((left, right) => left.distance - right.distance)[0] ?? null;
+}
+
+function frequencyForNote(note: string): number {
+  return 440 * 2 ** ((midiForNote(note) - 69) / 12);
+}
+
+function midiForNote(note: string): number {
+  const match = note.match(/^([A-G](?:#|b)?)(-?\d+)$/u);
+  if (!match) {
+    return 60;
+  }
+
+  const pitchClass = match[1];
+  const octave = Number(match[2]);
+  return (octave + 1) * 12 + (NOTE_OFFSETS[pitchClass] ?? 0);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function synthConfig(instrument: Exclude<InstrumentName, "sampledPiano">): {
+  type: OscillatorType;
+  attack: number;
+  decay: number;
+  release: number;
+  peakGain: number;
+  sustainGain: number;
+  filterFrequency: number;
+  filterQ: number;
+} {
+  if (instrument === "brightSynth") {
+    return {
+      type: "triangle",
+      attack: 0.01,
+      decay: 0.14,
+      release: 0.45,
+      peakGain: 0.38,
+      sustainGain: 0.17,
+      filterFrequency: 5200,
+      filterQ: 0.4
+    };
+  }
+
+  return {
+    type: "sine",
+    attack: 0.04,
+    decay: 0.2,
+    release: 0.7,
+    peakGain: 0.42,
+    sustainGain: 0.15,
+    filterFrequency: 3200,
+    filterQ: 0.2
+  };
 }
 
 function normalizeFolder(folder: string): string {

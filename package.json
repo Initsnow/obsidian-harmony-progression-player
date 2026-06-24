@@ -1,6 +1,6 @@
 {
   "name": "obsidian-harmony-progression-player",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Detect and play chord progressions in selected Obsidian folders.",
   "main": "main.js",
   "scripts": {

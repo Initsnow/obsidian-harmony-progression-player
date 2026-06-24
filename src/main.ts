@@ -48,6 +48,7 @@ import {
   PITCH_CLASSES,
   PlayableChord
 } from "./harmony";
+import { dataUrlToArrayBuffer } from "./data-url";
 
 interface HarmonyProgressionPlayerSettings {
   enabledFolders: string;
@@ -323,7 +324,7 @@ class ProgressionPlayer {
 
   dispose() {
     this.stop();
-    this.audioContext?.close();
+    void this.audioContext?.close();
     this.audioContext = null;
     this.masterGain = null;
     this.sampleBuffers.clear();
@@ -425,8 +426,7 @@ class ProgressionPlayer {
       return cachedBuffer;
     }
 
-    const response = await fetch(PIANO_SAMPLE_URLS[sampleNote]);
-    const arrayBuffer = await response.arrayBuffer();
+    const arrayBuffer = dataUrlToArrayBuffer(PIANO_SAMPLE_URLS[sampleNote]);
     const buffer = await audioContext.decodeAudioData(arrayBuffer);
     this.sampleBuffers.set(sampleNote, buffer);
     return buffer;
@@ -484,7 +484,7 @@ class HarmonyProgressionPlayerSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     new Setting(containerEl)
-      .setName("Harmony Progression Player")
+      .setName("Playback")
       .setHeading();
 
     new Setting(containerEl)

@@ -85,6 +85,12 @@ describe("harmony parser", () => {
       "Bbmaj7",
       "G"
     ]);
+    expect(parseProgression("IVΔ7 IVmΔ7 IIIm7 VIm7", settings).map((chord) => chord.symbol)).toEqual([
+      "Fmaj7",
+      "FmMaj7",
+      "Em7",
+      "Am7"
+    ]);
     expect(parseProgression("#IVø7 bVII7 ♯IVø7 ♭VII7", settings).map((chord) => chord.symbol)).toEqual([
       "F#m7b5",
       "Bb7",
@@ -117,6 +123,9 @@ describe("harmony parser", () => {
     ]);
     expect(findProgressions("桥段: IIm7 IΔ7 ♭VIIΔ7 V", settings).map((match) => match.text)).toEqual([
       "IIm7 IΔ7 ♭VIIΔ7 V"
+    ]);
+    expect(findProgressions("桥段: IVΔ7 IVmΔ7 IIIm7 VIm7", settings).map((match) => match.text)).toEqual([
+      "IVΔ7 IVmΔ7 IIIm7 VIm7"
     ]);
     expect(findProgressions("turnaround: #IVø7 bVII7 ♯IVø7 ♭VII7", settings).map((match) => match.text)).toEqual([
       "#IVø7 bVII7 ♯IVø7 ♭VII7"

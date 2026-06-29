@@ -59,9 +59,9 @@ const ROMAN_DEGREES: Record<string, number> = {
   VII: 7
 };
 
-const DEGREE_ROOT_SOURCE = "[b#]?(?:[1-7]|VII|VI|IV|V|III|II|I|vii|vi|iv|v|iii|ii|i)";
-const NOTE_ROOT_SOURCE = "[A-G](?:#|b)?";
-const QUALITY_SOURCE = "(?:6\\/9|Maj|maj|min|sus|dim|aug|add|alt|dom|no|omit|m|M|h|o|ø|\\+|°|\\^|Δ|\\d|#|b|\\([^)]{1,16}\\))*";
+const DEGREE_ROOT_SOURCE = "[b#♭♯]?(?:[1-7]|VII|VI|IV|V|III|II|I|vii|vi|iv|v|iii|ii|i)";
+const NOTE_ROOT_SOURCE = "[A-G](?:#|b|♭|♯)?";
+const QUALITY_SOURCE = "(?:6\\/9|Maj|maj|min|sus|dim|aug|add|alt|dom|no|omit|m|M|h|o|ø|\\+|°|\\^|Δ|\\d|#|b|♭|♯|\\([^)]{1,16}\\))*";
 const BASS_SOURCE = `(?:\\/(?:${DEGREE_ROOT_SOURCE}|${NOTE_ROOT_SOURCE}))?`;
 const TOKEN_PATTERN = `(?:${DEGREE_ROOT_SOURCE}|${NOTE_ROOT_SOURCE})${QUALITY_SOURCE}${BASS_SOURCE}`;
 const JOINER_PATTERN = "(?:\\s*(?:->|-->|=>|⇒|→|-|–|—|>|\\|)\\s*|\\s+)";
@@ -316,12 +316,14 @@ function isDegreeToken(token: string): boolean {
 }
 
 function isRichChordToken(token: string): boolean {
-  return /(?:maj|min|sus|dim|aug|add|alt|dom|no|omit|m7|M7|7|9|11|13|6|o|ø|\+|°|\^|Δ|\/)/u.test(token);
+  return /(?:maj|min|sus|dim|aug|add|alt|dom|no|omit|m7|M7|7|9|11|13|6|o|ø|\+|°|\^|Δ|♭|♯|#|\/)/u.test(token);
 }
 
 function normalizeChordToken(token: string): string {
   return token
     .trim()
+    .replace(/♭/gu, "b")
+    .replace(/♯/gu, "#")
     .replace(/6\/9/gu, "69")
     .replace(/Maj/gu, "maj")
     .replace(/Δ/gu, "maj")
@@ -337,6 +339,8 @@ function normalizeChordToken(token: string): string {
 
 function normalizeQualitySuffix(suffix: string): string {
   return suffix
+    .replace(/♭/gu, "b")
+    .replace(/♯/gu, "#")
     .replace(/6\/9/gu, "69")
     .replace(/Maj/gu, "maj")
     .replace(/Δ/gu, "maj")

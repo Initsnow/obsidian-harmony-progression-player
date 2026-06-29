@@ -15,6 +15,12 @@ describe("harmony parser", () => {
       "B7b9",
       "Em9"
     ]);
+    expect(tokenizeProgression("IIm7 IΔ7 ♭VIIΔ7 V")).toEqual([
+      "IIm7",
+      "IΔ7",
+      "♭VIIΔ7",
+      "V"
+    ]);
   });
 
   it("parses ninth, eleventh, thirteenth, and altered chords", () => {
@@ -30,6 +36,8 @@ describe("harmony parser", () => {
   it("normalizes common jazz spellings before Tonal parsing", () => {
     expect(parseChordToken("C7(b9)", settings)?.symbol).toBe("C7b9");
     expect(parseChordToken("Cmaj7(#11)", settings)?.symbol).toBe("Cmaj7#11");
+    expect(parseChordToken("C7(♭9)", settings)?.symbol).toBe("C7b9");
+    expect(parseChordToken("Cmaj7(♯11)", settings)?.symbol).toBe("Cmaj7#11");
     expect(parseChordToken("C7omit5", settings)?.symbol).toBe("C7no5");
     expect(parseChordToken("C6/9", settings)?.symbol).toBe("C69");
   });
@@ -71,6 +79,18 @@ describe("harmony parser", () => {
       "Fmaj9",
       "Cmaj9"
     ]);
+    expect(parseProgression("IIm7 IΔ7 ♭VIIΔ7 V", settings).map((chord) => chord.symbol)).toEqual([
+      "Dm7",
+      "Cmaj7",
+      "Bbmaj7",
+      "G"
+    ]);
+    expect(parseProgression("#IVø7 bVII7 ♯IVø7 ♭VII7", settings).map((chord) => chord.symbol)).toEqual([
+      "F#m7b5",
+      "Bb7",
+      "F#m7b5",
+      "Bb7"
+    ]);
   });
 
   it("finds extended progressions in prose without matching single chords", () => {
@@ -94,6 +114,12 @@ describe("harmony parser", () => {
     ]);
     expect(findProgressions("`1-1-4-1-5-4-1`", settings).map((match) => match.text)).toEqual([
       "1-1-4-1-5-4-1"
+    ]);
+    expect(findProgressions("桥段: IIm7 IΔ7 ♭VIIΔ7 V", settings).map((match) => match.text)).toEqual([
+      "IIm7 IΔ7 ♭VIIΔ7 V"
+    ]);
+    expect(findProgressions("turnaround: #IVø7 bVII7 ♯IVø7 ♭VII7", settings).map((match) => match.text)).toEqual([
+      "#IVø7 bVII7 ♯IVø7 ♭VII7"
     ]);
     expect(findProgressions("single Cmaj9 is not a progression", settings)).toEqual([]);
   });

@@ -225,26 +225,53 @@ function parseDegree(token: string): DegreeMatch | null {
 
 function resolveDegreeSuffix(degree: DegreeMatch): string {
   const suffix = normalizeQualitySuffix(degree.suffix);
+  const baseQuality = getDegreeBaseQuality(degree);
   if (!suffix) {
-    if (degree.explicitMinor) {
-      return "m";
-    }
-    if (degree.explicitMajor) {
-      return "";
-    }
-    return DEGREE_QUALITIES[degree.degree - 1];
+    return baseQuality;
+  }
+
+  const bareAlteredFifth = normalizeBareAlteredFifthSuffix(suffix, baseQuality);
+  if (bareAlteredFifth) {
+    return bareAlteredFifth;
   }
 
   if (/^(?:7|9|11|13|6|add|sus|no|omit)/u.test(suffix)) {
-    const baseQuality = degree.explicitMinor
-      ? "m"
-      : degree.explicitMajor
-        ? ""
-        : DEGREE_QUALITIES[degree.degree - 1];
     return `${baseQuality}${suffix}`;
   }
 
   return suffix;
+}
+
+function getDegreeBaseQuality(degree: DegreeMatch): string {
+  if (degree.explicitMinor) {
+    return "m";
+  }
+  if (degree.explicitMajor) {
+    return "";
+  }
+  return DEGREE_QUALITIES[degree.degree - 1];
+}
+
+function normalizeBareAlteredFifthSuffix(suffix: string, baseQuality: string): string | null {
+  if (suffix === "#5") {
+    if (baseQuality === "m") {
+      return "m#5";
+    }
+    if (baseQuality === "") {
+      return "aug";
+    }
+  }
+
+  if (suffix === "b5") {
+    if (baseQuality === "m" || baseQuality === "dim") {
+      return "dim";
+    }
+    if (baseQuality === "") {
+      return "Mb5";
+    }
+  }
+
+  return null;
 }
 
 function parseDegreeBass(token: string, settings: HarmonyParseSettings): string | null {
@@ -325,6 +352,8 @@ function normalizeChordToken(token: string): string {
     .replace(/♭/gu, "b")
     .replace(/♯/gu, "#")
     .replace(/6\/9/gu, "69")
+    .replace(new RegExp(`^(${NOTE_ROOT_SOURCE})\\(#5\\)(${BASS_SOURCE})$`, "u"), "$1aug$2")
+    .replace(new RegExp(`^(${NOTE_ROOT_SOURCE})\\(b5\\)(${BASS_SOURCE})$`, "u"), "$1Mb5$2")
     .replace(/Maj/gu, "maj")
     .replace(/Δ/gu, "maj")
     .replace(/\^/gu, "maj")

@@ -364,7 +364,8 @@ function normalizeChordToken(token: string): string {
     .replace(/h7?\b/gu, "m7b5")
     .replace(/omit/giu, "no")
     .replace(/(^|[^n])o(?=\d|$)/gu, "$1dim")
-    .replace(/\(([^)]{1,16})\)/gu, "$1");
+    .replace(/\(([^)]{1,16})\)/gu, "$1")
+    .replace(new RegExp(`^(${NOTE_ROOT_SOURCE})min(?=\\d|add|sus|b|#|$)`, "u"), "$1m");
 }
 
 function normalizeQualitySuffix(suffix: string): string {
@@ -383,7 +384,9 @@ function normalizeQualitySuffix(suffix: string): string {
     .replace(/^h7?\b/u, "m7b5")
     .replace(/omit/giu, "no")
     .replace(/^o(?=\d|$)/u, "dim")
-    .replace(/\(([^)]{1,16})\)/gu, "$1");
+    .replace(/\(([^)]{1,16})\)/gu, "$1")
+    .replace(/^min(?=\d|add|sus|b|#|$)/u, "m")
+    .replace(/^(?:m|min)b5$/u, "dim");
 }
 
 function normalizeSlashAlias(symbol: string): string {
